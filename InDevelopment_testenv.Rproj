@@ -1,0 +1,20 @@
+Version: 1.0
+ProjectId: 634fd303-3be8-4664-8199-5dfe30b2ff00
+
+RestoreWorkspace: Yes
+SaveWorkspace: Yes
+AlwaysSaveHistory: Yes
+
+EnableCodeIndexing: Yes
+UseSpacesForTab: Yes
+NumSpacesForTab: 2
+Encoding: UTF-8
+
+RnwWeave: Sweave
+LaTeX: pdfLaTeX
+
+QuitChildProcessesOnExit: Yes
+
+MarkdownWrap: Sentence
+MarkdownReferences: Block
+MarkdownCanonical: Yes
