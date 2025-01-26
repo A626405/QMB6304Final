@@ -12,17 +12,17 @@ write(r_version, file = "DESCRIPTION", append = TRUE)
 
 rm(r_version)
 gc()
-
+'
 if (!file.exists("renv.lock")) {
   renv::init(profile="default",repos=("https://cloud.r-project.org"),bare=T)
 }else{
   renv::snapshot(type="explicit",update=T,dev=T)
 }
 
-renv::init(bare=T)
-renv::install(packages=Libs,library="app_config/library",lock=T,rebuild=T,type="binary")
-renv::snapshot(lockfile="app_config/renv.lock",type="all",library="app_config/library",packages=NULL)
-
+#renv::init(bare=T)
+#renv::install(packages=Libs,library="app_config/library",lock=T,rebuild=T,type="binary")
+#renv::snapshot(lockfile="app_config/renv.lock",type="all",library="app_config/library",packages=NULL)
+'
 load_lb<-function(){
   num_cores<-parallel::detectCores()-1
   cl<-Parallel::makeCluster(num_cores)
@@ -31,14 +31,14 @@ load_lb<-function(){
   parallel::mclapply(Libs, function(pkg){
     
     if (!requireNamespace(pkg,quietly=T,)) {
-      renv::install(pkg,library="app_config/library/",lock=T,type='binary',repos='https://cloud.r-project.org',rebuild=T)
+      renv::install(pkg,library="app_config/library/",lock=T,type="binary",repos="https://cloud.r-project.org",rebuild=T)
       }
   },mc.cores = num_cores)  
   
   parallel::stopCluster(cl)
   cat("All specified libraries are loaded into the global environment.\n")
 }
-
+'
 requireNamespace("reticulate",include.only=T,attach.required=T)
 requireNamespace("dplyr",include.only=T,attach.required=T)
 requireNamespace("tidyr",include.only=T,attach.required=T)
