@@ -16,6 +16,4 @@ tidyr,
 reticulate,
 jsonlite,
 data.table,
-parallel,
-doParallel
-Depends: R (>= 4.4.2)
+parallel
