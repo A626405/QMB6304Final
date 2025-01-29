@@ -1,5 +1,15 @@
+require(DBI)
+require(RSQLite)
+require(reticulate)
+require(dplyr)
+require(tidyr)
+require(tibble)
+mem.maxVSize(vsize=636)
+
+
 source("code/R/functions.r")
 reticulate::py_run_file("code/Python/functions.py")
+#reg.finalizer(e, f, onexit = FALSE)
 
 selectedcols<-c("datetime", "host", "proto", "spt", "dpt", "srcstr", "cc", "country", "latitude", "longitude")
 raw_data <- data.table::fread("data/internal/AWS_Honeypot_marx-geo.csv",sep=",",quote="\"",strip.white=T,fill=T,blank.lines.skip=T,header=T,na.strings=c("NA",NULL,"",",,"),keepLeadingZeros=F,select=c("datetime", "host", "proto", "spt", "dpt", "srcstr", "cc", "country", "longitude", "latitude"), colClasses=list(character=c(1:5,8:13),integer=6:7,double=14:15,NULL=16),data.table=T,nThread= (parallel::detectCores()-1),nrows=451581)
@@ -28,7 +38,7 @@ cc_countrydf <- data.table::fread("data/external/all.csv",sep=",",quote="\"",sel
 region<-working_data$region
 region <- stringi::stri_replace_first(working_data$region,fixed=c("country\n0 "),replacement="")
 region <- stringi::stri_replace_first(region,fixed=c("0 "),replacement="")
-working_data<-working_data[working_data$region %in% region, ]
+working_data<-working_data[region %in% working_data$region, ]
 rm(region)
 gc(F,T,T)
 
@@ -65,25 +75,21 @@ working_data$region <- replace(working_data$region,matched_index,country_ips[,2]
 rm(ips,matched_index,country_ips)
 gc(F,T,T)
 
-sum(is.na.data.frame(working_data))
-sum(is.na(working_data$region))
-sum(is.na(working_data$cc))
-
-#saveRDS(working_data,"data/internal/temp_working_data_cc.RDS",compress="gzip")
 
 cc_countrydf <- data.table::fread(input= "data/external/GeoLite2-Country-CSV_20250103/GeoLite2-Country-Locations-en.csv",select=c(1,5,6),col.names=c("geoname_id", "cc", "region"), sep=",",quote="\"",header=T,keepLeadingZeros=T,data.table=T,colClasses=c(character(7)),nThread=(parallel::detectCores() - 1))
-
 working_data <- dplyr::left_join(working_data,cc_countrydf)
 rm(cc_countrydf)
 gc(F,T,T)
+
 working_data <- working_data |> dplyr::mutate(geoname_id=NULL)
+gc(F,F,T)
 
 day<- reorder( stringi::stri_sub(as.character(working_data$dates),from=9L,length=2,ignore_negative_length=F),working_data$datetime)
+
 working_data <- working_data |>
   dplyr::rename("port"="spt","protocol"="proto") |>
-  dplyr::mutate("dpt"=NULL,"src"=NULL,"month"=c(months.Date(working_data$dates,abbreviate=T)),"day"=day, "year" = c(rep("2013",nrow(working_data)))) |>
-  dplyr::arrange(datetime) |>
-  dplyr::mutate("dates"=NULL)
+  dplyr::mutate("dpt"=NULL,"src"=NULL,"month"=c(months.Date(working_data$dates,abbreviate=T)),"day"=day,"dates"=NULL, "year" = c(rep("2013",nrow(working_data)))) |>
+  dplyr::arrange(datetime) 
 
 rm(day)
 gc(F,F,T)
@@ -109,11 +115,38 @@ working_data<- dplyr::left_join(working_data,portmatchdata)
 rm(portmatchdata)
 gc(F,T,T)
 
-working_data<-working_data |> dplyr::mutate(V1=NULL)
+dates<- c(strptime(as.character(working_data$datetime), format = "%m/%d/%y"))
+dates<- lubridate::floor_date(dates,unit="1 minute")
+
+working_data1 <- working_data |>
+  dplyr::ungroup() |>
+  dplyr::mutate("time_interval"=c(dates),"V1"=NULL,"portsnum"=NULL) |>
+  dplyr::group_by(date,month,day,time,host,time_interval,port,protocol,srcstr,service,.drop=F) |>
+  dplyr::add_count(srcstr,port,date,month,day,time,host,name="countip_bymin",.drop=F) |>
+  dplyr::distinct(.keep_all=F)
+
+rm(working_data,dates)
+gc(F,T,T)
+
+#working_data2 <- which(working_data1[working_data1$countip_bymin,]==T)
+
+
+working_data1$seqports <- as.character(factor(dplyr::consecutive_id(working_data1$date,working_data1$month,working_data1$day,working_data1$protocol,working_data1$port,working_data1$host,working_data1$countip_bymin,working_data1$region,working_data1$cc,working_data1$service)))
+
+working_data1$time_interval = NULL
+
+working_data3 <- working_data1 |>
+  dplyr::group_by(date,time,month,day,host,port,protocol,srcstr,countip_bymin,seqports,service) |>
+  dplyr::count(seqports,port,protocol,host,time,date,month,day,name="countipsperport",.drop=T) 
+
+working_data1$seqportip <- as.character.factor(factor(dplyr::consecutive_id(working_data1$date,working_data1$month,working_data1$day,working_data1$protocol,working_data1$port,working_data1$srcstr,working_data1$countip_bymin)))
+
+rm(working_data1)
+gc(F,T,T)
 
 
 save(working_data,file="data/internal/temp/working_data.RDA",compress="gzip")
-#rm(working_data)
+rm(working_data)
 gc(F,T,T)
 
 workdata_savedb = list(rda_path="data/internal/temp/working_data.RDA",rda_name="working_data.RDA",db_path="data/internal/datasets.db",db_name="main_datasets",file_name="file_name")
@@ -122,7 +155,3 @@ save_db(workdata_savedb$rda_path,workdata_savedb$rda_name,workdata_savedb$db_pat
 rm(workdata_savedb)
 gc(F,F,T)
 
-working_data <- working_data |>
-  dplyr::count(datetime,srcstr,port) |>
-  dplyr::group_by(datetime,srcstr,port) |>
-  dplyr::count(srcstr,port)
