@@ -23,7 +23,7 @@ if (!file.exists("renv.lock")) {
 #renv::install(packages=Libs,library="app_config/library",lock=T,rebuild=T,type="binary")
 #renv::snapshot(lockfile="app_config/renv.lock",type="all",library="app_config/library",packages=NULL)
 '
-load_lb<-function(){
+'load_lb<-function(){
   num_cores<-parallel::detectCores()-1
   cl<-Parallel::makeCluster(num_cores)
   doParallel::registerDoParallel(cl)

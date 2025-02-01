@@ -1,30 +1,18 @@
-require(DBI)
-require(RSQLite)
-require(reticulate)
-require(dplyr)
-require(tidyr)
-require(tibble)
-mem.maxVSize(vsize=636)
-
-
 source("code/R/functions.r")
+create_db()
 reticulate::py_run_file("code/Python/functions.py")
-#reg.finalizer(e, f, onexit = FALSE)
+
 
 selectedcols<-c("datetime", "host", "proto", "spt", "dpt", "srcstr", "cc", "country", "latitude", "longitude")
 raw_data <- data.table::fread("data/internal/AWS_Honeypot_marx-geo.csv",sep=",",quote="\"",strip.white=T,fill=T,blank.lines.skip=T,header=T,na.strings=c("NA",NULL,"",",,"),keepLeadingZeros=F,select=c("datetime", "host", "proto", "spt", "dpt", "srcstr", "cc", "country", "longitude", "latitude"), colClasses=list(character=c(1:5,8:13),integer=6:7,double=14:15,NULL=16),data.table=T,nThread= (parallel::detectCores()-1),nrows=451581)
 rm(selectedcols)
-gc()
 
-raw_data <- raw_data |> 
-  dplyr::mutate("datetimes"= c(raw_data$datetime),"dates"= c(strptime(as.character(raw_data$datetime), format = "%m/%d/%y"))) |>
-  tidyr::separate(datetimes, into = c("date", "time"), sep = " ") |>
-  dplyr::mutate("host"=gsub("-", "_", raw_data$host),"dpt"= c(tidyr::replace_na(raw_data$spt,99999)),"spt"= c(tidyr::replace_na(raw_data$dpt,99999)))
-
+#options(nsize = 18.8e6,vsize=8e7)  # ~512MB for ncells
 gc(F,T,T)
 
 working_data <- raw_data |>
-  dplyr::select(datetime,date,time,host,srcstr,proto,spt,dpt,longitude,latitude,cc,country,dates) |>
+  dplyr::mutate("host"=gsub("-", "_", raw_data$host),"dpt"= c(tidyr::replace_na(raw_data$spt,99999)),"spt"= c(tidyr::replace_na(raw_data$dpt,99999)))|>
+  dplyr::select(datetime,srcstr,proto,spt,dpt,longitude,latitude,cc,country) |>
   dplyr::group_by() |>
   dplyr::arrange(.by_group=T) |>
   dplyr::rename("region"="country","long"="longitude","lat"="latitude") 
@@ -47,7 +35,7 @@ rm(cc_countrydf)
 gc(F,F,T)
 
 na_indices<-which(is.na(working_data$region))
-ips_to_check<-data.frame(cbind(working_data$datetime[na_indices],working_data$region[na_indices],working_data$srcstr[na_indices],working_data$date[na_indices],working_data$time[na_indices],working_data$spt[na_indices],working_data$proto[na_indices],working_data$host[na_indices]))
+ips_to_check<-data.frame(cbind(working_data$datetime[na_indices],working_data$region[na_indices],working_data$srcstr[na_indices],working_data$spt[na_indices],working_data$proto[na_indices],working_data$host[na_indices]))
 
 reticulate::import("sqlite3",convert=T,delay_load=T)
 reticulate::import("pandas",as="pd",convert=T,delay_load=T)
@@ -81,77 +69,86 @@ working_data <- dplyr::left_join(working_data,cc_countrydf)
 rm(cc_countrydf)
 gc(F,T,T)
 
-working_data <- working_data |> dplyr::mutate(geoname_id=NULL)
+working_data <- working_data |> dplyr::mutate("geoname_id"=NULL)
 gc(F,F,T)
-
-day<- reorder( stringi::stri_sub(as.character(working_data$dates),from=9L,length=2,ignore_negative_length=F),working_data$datetime)
 
 working_data <- working_data |>
   dplyr::rename("port"="spt","protocol"="proto") |>
-  dplyr::mutate("dpt"=NULL,"src"=NULL,"month"=c(months.Date(working_data$dates,abbreviate=T)),"day"=day,"dates"=NULL, "year" = c(rep("2013",nrow(working_data)))) |>
+  dplyr::mutate("dpt"=NULL,"src"=NULL,"dates"=NULL) |>
   dplyr::arrange(datetime) 
 
-rm(day)
 gc(F,F,T)
 
-port<-c("1433","99999","445","3389","80","56338","8080","22","3306","2193","135","53","23","5060","6666","443","3128","5900","19","1469","21","25","110","143","7","389","123","68","5432","1434","1900","5353","161","179","139","137","111","0","13","9","3","2","1","37","33","26","38","42")
-service<-c("MSSQL_Server","ICMP","SMB","RDP","HTTP","UDP_Flood1","HTTPAlt","SSH","MySQL","UDP_Flood2","RPC","DNS","Telnet","SIP","IRC","HTTPS","Squid_Proxy","VNC","CHARGEN","AAL_LM","FTP","SMTP","POP3","IMAP","Echo","LDAP","NTP","DHCPClient","PostgreSQL","MSSQL_Monitor","SSDP","MDNS","SNMP","BGP","NETBIOS_ssh","NETBIOS_ns","RCPBind","Reserved","Daytime","Discard","compressnet","compressnet","tcpnux","time","dsp","unassigned","rap","nameserver_WIN")
+port<-c("1433","445","3389","3306","135","53","5060","5900","123","389","5432","1434","1900","5353","11211",
+        "19","137","138","161","162","500","1900","3702","5683","20800","3283","7547","11211","7100")
+service<-c("MSSQL","SMB","RDP","MSSQL","RPC","DNS","SIP","VNC","NTP","LDAP","MSSQL","MSSQL","SSDP","mDNS","Memcached",
+           "Chargen","NetBIOS_NS","NetBIOS_DGM","SNMP","SNMP_Trap","ISAKMP","SSDP","WS_Discovery","CoAP","CompuServe",
+           "NetAssistant","TR_069","Memcached","X11")
+protocol<-c("UDP","TCP","TCP","UDP","TCP","UDP","UDP","TCP","UDP","UDP","UDP","UDP","UDP","UDP","UDP",
+            "UDP","UDP","UDP","UDP","UDP","UDP","UDP","UDP","UDP","UDP","UDP","UDP","UDP","UDP")
 
-servdict<-data.frame(cbind(c(1:48),port,service),portsnum=as.numeric(port))
+ddosport <- c(rep(1,length(port)))
+servdict<-data.frame(cbind(ddosport,port,service))
 
 working_data$port <- as.character(working_data$port)
-working_data<- dplyr::left_join(working_data,servdict)
+working_data <- dplyr::left_join(working_data,servdict,relationship="many-to-many")
+working_data$service <- c(tidyr::replace_na(working_data$service,replace="NonDDoS"))
+working_data$ddosport <- c(tidyr::replace_na(working_data$ddosport,replace="0"))
+
 
 rm(port,service,servdict)
 gc(F,F,T)
 
-portmatchdata<- data.table::fread("data/external/service-names-port-numbers.csv",nThread= (parallel::detectCores(logical=T)-1),quote="\"",skip=1,sep=c(","),select=c(1,2,3),col.names=c("service","port","protocol"),colClasses=list(character=c(1,2,3),NULL=4:12),blank.lines.skip=T,na.strings=c("",",,,","NA"),header=T,data.table=T)
-portmatchdata<-na.omit(portmatchdata)
-
-portmatchdata$protocol <- toupper(portmatchdata$protocol)
-portmatchdata$port <- as.character(portmatchdata$port)
-
-working_data<- dplyr::left_join(working_data,portmatchdata)
-rm(portmatchdata)
+datetimes <- as.POSIXct(strptime(working_data$datetime, "%m/%d/%y %H:%M"))
+working_data$datetime1 <- lubridate::floor_date(datetimes,unit="1 minute")
+working_data$datetime5 <- lubridate::floor_date(datetimes,unit="5 minute")
+rm(datetimes)
 gc(F,T,T)
 
-dates<- c(strptime(as.character(working_data$datetime), format = "%m/%d/%y"))
-dates<- lubridate::floor_date(dates,unit="1 minute")
+#working_data <- as.ts(working_data)
 
-working_data1 <- working_data |>
+working_data <- working_data |>
   dplyr::ungroup() |>
-  dplyr::mutate("time_interval"=c(dates),"V1"=NULL,"portsnum"=NULL) |>
-  dplyr::group_by(date,month,day,time,host,time_interval,port,protocol,srcstr,service,.drop=F) |>
-  dplyr::add_count(srcstr,port,date,month,day,time,host,name="countip_bymin",.drop=F) |>
-  dplyr::distinct(.keep_all=F)
+  dplyr::select(datetime5,datetime1,service,protocol,port,ddosport,srcstr,region,region,cc,long,lat) |>
+  dplyr::mutate("V1"=NULL,"portsnum"=NULL,"datetime"=NULL) |>
+  dplyr::group_by(datetime5,datetime1,service,protocol,ddosport) |>
+  dplyr::add_count(ddosport,service,protocol,datetime1,name="countservice_1min",wt=NULL)
 
-rm(working_data,dates)
 gc(F,T,T)
 
-#working_data2 <- which(working_data1[working_data1$countip_bymin,]==T)
+working_data <- working_data |>
+  dplyr::select(datetime5,datetime1,service,protocol,port,ddosport,srcstr,region,region,cc,long,lat,countservice_1min) |>
+  dplyr::group_by(datetime5,service,protocol,ddosport) |>
+  dplyr::add_count(ddosport,service,protocol,datetime5,name="countservice_5min",wt=NULL) 
 
+working_data <- working_data |>
+  dplyr::select(datetime5,datetime1,service,protocol,port,ddosport,srcstr,region,region,cc,long,lat,countservice_1min,countservice_5min,) |>
+  dplyr::group_by(datetime5,service,protocol,ddosport) |>
+  dplyr::add_count(region,cc,protocol,datetime5,name="countregion_5min",wt=NULL)
 
-working_data1$seqports <- as.character(factor(dplyr::consecutive_id(working_data1$date,working_data1$month,working_data1$day,working_data1$protocol,working_data1$port,working_data1$host,working_data1$countip_bymin,working_data1$region,working_data1$cc,working_data1$service)))
+working_data <- working_data |> 
+  dplyr::select(datetime5,datetime1,service,protocol,port,ddosport,srcstr,region,region,cc,long,lat,countservice_1min,countservice_5min,countregion_5min) |>
+  dplyr::add_count(srcstr,protocol,datetime5,name="countip_5min",wt=NULL)
 
-working_data1$time_interval = NULL
-
-working_data3 <- working_data1 |>
-  dplyr::group_by(date,time,month,day,host,port,protocol,srcstr,countip_bymin,seqports,service) |>
-  dplyr::count(seqports,port,protocol,host,time,date,month,day,name="countipsperport",.drop=T) 
-
-working_data1$seqportip <- as.character.factor(factor(dplyr::consecutive_id(working_data1$date,working_data1$month,working_data1$day,working_data1$protocol,working_data1$port,working_data1$srcstr,working_data1$countip_bymin)))
-
-rm(working_data1)
 gc(F,T,T)
-
-
 save(working_data,file="data/internal/temp/working_data.RDA",compress="gzip")
+
+labeled_data <- working_data[,c(3:15)]
+
 rm(working_data)
 gc(F,T,T)
 
+save(labeled_data,file="data/internal/temp/labled_data.RDA",compress="gzip")
+rm(labeled_data)
+
+
 workdata_savedb = list(rda_path="data/internal/temp/working_data.RDA",rda_name="working_data.RDA",db_path="data/internal/datasets.db",db_name="main_datasets",file_name="file_name")
 save_db(workdata_savedb$rda_path,workdata_savedb$rda_name,workdata_savedb$db_path,workdata_savedb$db_name,workdata_savedb$file_name)
-
 rm(workdata_savedb)
-gc(F,F,T)
+gc(F,T,T)
+
+lableddata_savedb = list(rda_path="data/internal/temp/labled_data.RDA",rda_name="labled_data.RDA",db_path="data/internal/datasets.db",db_name="main_datasets",file_name="file_name")
+save_db(lableddata_savedb$rda_path,lableddata_savedb$rda_name,lableddata_savedb$db_path,lableddata_savedb$db_name,lableddata_savedb$file_name)
+rm(lableddata_savedb)
+gc(F,T,T)
 

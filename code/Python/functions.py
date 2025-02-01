@@ -11,6 +11,7 @@ def create_db(db_path):
             file_name TEXT,
             data BLOB
         );''')
+        
         conn.commit()
         cursor.execute("CREATE INDEX file_name_idx1 ON main_datasets(file_name);")
         conn.commit()
@@ -28,6 +29,11 @@ def create_db(db_path):
         print(f"The specified file '{db_path}' does not exist.")
   except Exception as e:
         print(f"An unexpected error occurred: '{e}'")
+        
+        
+        
+        
+        
 
 
 
@@ -46,6 +52,7 @@ def write_db(rda_path,rda_name,db_path,tbl_name):
 
       cursor.execute(f"INSERT INTO {tbl_name} (file_name, data) VALUES (?, ?)", (rda_name, binary_data))
       conn.commit()
+
       cursor.execute("VACUUM;")
       conn.commit()
       conn.close()
@@ -61,10 +68,12 @@ def write_db(rda_path,rda_name,db_path,tbl_name):
     print(f"The specified file '{db_path}' does not exist.")
   except Exception as e:
     print(f"An unexpected error occurred: '{e}'")
-
-
-
-
+    
+    
+    
+    
+    
+    
 
 '''def read_db(path_to_db_char,file_name):
     import sqlite3
