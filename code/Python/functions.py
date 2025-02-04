@@ -99,15 +99,70 @@ def write_db(rda_path,rda_name,db_path,tbl_name):
 
 
 
-def get_country(ip):
-    import geoip2
-    import geoip2.database
-    import pandas as pd
-    reader = geoip2.database.Reader('data/external/GeoLite2-Country.mmdb')
+import geoip2.database
+import pandas as pd
+def process_ip_file1(input_csv, output_csv, db_path='data/external/GeoLite2-Country.mmdb'):
 
+    reader = geoip2.database.Reader(db_path)
+
+    def get_country(ip):
+        """Retrieves the country name for a given IP using the MaxMind database."""
+        try:
+            response = reader.country(ip)
+            return response.country.name if response.country.name else None
+        except geoip2.errors.AddressNotFoundError:
+            return None  
+
+    df = pd.read_csv(input_csv)
+
+    df['country'] = df['x'].apply(get_country)
+
+    df = df.dropna(subset=['country'])
+
+    df.to_csv(output_csv, index=False)
+
+    print(f"Saved the output to '{output_csv}'")
+
+
+
+
+
+
+
+import requests
+import pandas as pd
+import time
+
+def get_country(ip):
+    """Fetch country for an IP using ip-api.com without proxies, handling failures."""
+    url = f"http://ip-api.com/json/{ip}"
+    
     try:
-        response = reader.country(ip)
-        return pd.DataFrame({'country':[response.country.name]})
-    except:
-        return pd.DataFrame({'country':[pd.NA]})
+        response = requests.get(url, timeout=5)
+        data = response.json()
+        if data.get("status") == "success":
+            return data.get("country")
+        else:
+            return None 
+    except requests.RequestException:
+        return None 
+
+def process_ip_file(input_csv, output_csv):
+    df = pd.read_csv(input_csv)
+    
+    results = []
+    for index, ip in enumerate(df['x']):
+        country = get_country(ip)
+        results.append(country)
+
+        if (index + 1) % 38 == 0:
+            print(f"Processed {index + 1} IPs, waiting 60 seconds...")
+            time.sleep(60)
+
+    df['country'] = results
+
+    df = df.dropna(subset=['country'])
+
+    df.to_csv(output_csv, index=False)
+    print(f"Saved output to {output_csv}")
 

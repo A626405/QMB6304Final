@@ -12,27 +12,28 @@ gc(F,F,T)
 #options("digits.secs"=0,"max.print"=1000,datatable.optimize=T)
 
 datetimes <- as.POSIXlt(raw_data$datetime, format="%d/%m/%y %M:%OS",tz="")
-datetimes <- format(raw_data$datetime,format= "%m/%d %M:%OS", tz="", usetz=F)
+datetimes <- format(datetimes,format= "%Y/%m/%d %I:%M:%OS:%Os%H",tz="UTC", usetz=F,digits=10)
+datetimes <- as.character.POSIXt(datetimes)
+raw_data$datetimes <- datetimes
+#working_data$seconds <- C(as.character.POSIXt(working_data$datetimes))
 
-#tail(datetimes1,n=100)
-#datetimes1 <- format(datetimes,format="%D %m:%M:%OS:%Os", tz="LMT", usetz=T)
+#raw_data$datetimes <- C(round.POSIXt(datetimes,units="secs"))
+#datetimes <- round.POSIXt(datetimes)
+rm(datetimes)
+gc(F,T,T)
 
-datetimes1 <- format(datetimes,format= "%Y/%m/%d %I:%M:%OS:%H.%Os", tz="UTC", usetz=F,digits=4)
-datetimes2<-as.double.POSIXlt(datetimes1)
+"
+<- datetimes2 / 1e10
 
-
-
-round.POSIXt(datetimes2)
 lubridate::am(datetimes1)
 
 lubridate::decimal_date(datetimes1)
 raw_data$datetimes <- c(datetimes)
 format()
-rm(datetimes)
 gc(F,F,T)
-
+"
 working_data <- raw_data |>
-  dplyr::mutate("host"=gsub("-", "_", raw_data$host),"dpt"= c(tidyr::replace_na(raw_data$spt,99999)),"spt"= c(tidyr::replace_na(raw_data$dpt,99999)))|>
+  dplyr::mutate("host"=gsub("-", "_", raw_data$host),"dpt"= c(tidyr::replace_na(raw_data$dpt,99999)),"spt"= c(tidyr::replace_na(raw_data$spt,99999)))|>
   dplyr::select(datetime,datetimes,srcstr,proto,host,spt,dpt,longitude,latitude,cc,country) |>
   dplyr::group_by() |>
   dplyr::arrange(.by_group=T) |>
@@ -40,92 +41,113 @@ working_data <- raw_data |>
 rm(raw_data)
 gc(F,F,T)
 
-cc_countrydf <- data.table::fread("data/external/all.csv",sep=",",quote="\"",select=c(1,2),col.names=c("region", "cc"),keepLeadingZeros=F,na.strings=c("NA","",",,"),data.table=T,nThread= (parallel::detectCores()-1))
-
-region <- stringi::stri_replace_first(working_data$region,fixed=c("country\n0 "),replacement="")
-region <- stringi::stri_replace_first(region,fixed=c("0 "),replacement="")
-working_data<-working_data[region %in% working_data$region, ]
-rm(region)
+USI<-which(working_data$cc == "US")
+working_data$region<-replace(working_data$region,USI,"United States")
+rm(USI)
 gc(F,F,T)
-working_data <- dplyr::left_join(working_data,cc_countrydf,copy=F,keep=F) 
-rm(cc_countrydf)
-gc(F,T,T)
+
+HKI<-which(working_data$cc == "HK")
+working_data$region<-replace(working_data$region,HKI,"Hong Kong")
+rm(HKI)
+working_data <- working_data |> dplyr::mutate("cc"=NULL)
+gc(F,F,T)
+
 
 na_indices<-which(is.na(working_data$region))
-ips_to_check<-data.frame(cbind(working_data$datetime[na_indices],working_data$region[na_indices],working_data$srcstr[na_indices],working_data$spt[na_indices],working_data$proto[na_indices],working_data$host[na_indices]))
-rm(na_indices)
+ips_to_check<-data.frame('x'=working_data$srcstr[na_indices])
+write.csv2(ips_to_check,"data/tempdata/ips_file.csv",row.names=F,col.names=T)
+rm(na_indices,ips_to_check)
+gc(F,F,T)
+
+require(reticulate,include.only=T)
+reticulate::import("sqlite3",delay_load=T)
+reticulate::import("pandas",as="pd",delay_load=T)
+reticulate::import("geoip2",delay_load=T)
+
+reticulate::py$process_ip_file1('data/tempdata/ips_file.csv', 'data/tempdata/ips_with_country.csv')
+
+file.remove('data/tempdata/ips_file.csv')
 gc()
-
-require(reticulate,quietly=T,include.only=T)
-reticulate::import("sqlite3",convert=T,delay_load=T)
-reticulate::import("pandas",as="pd",convert=T,delay_load=T)
-reticulate::import("geoip2",convert=T,delay_load=T)
-
-ips_to_check1<- sapply(ips_to_check[,3], reticulate::py$get_country)
-rm(ips_to_check)
+resolvedcountries <- data.table::fread(input="data/tempdata/ips_with_country.csv",header=T,col.names=c("srcstr", "region"),nThread=(parallel::detectCores()-1))
+working_data <- dplyr::left_join(working_data,resolvedcountries)
+rm(resolvedcountries)
+file.remove('data/tempdata/ips_with_country.csv')
 gc(F,F,T)
 
-ips_to_check2 <- stringi::stri_list2matrix(ips_to_check1)
-ips <-unlist(c(attributes(ips_to_check1)))
-ips <- stringi::stri_replace_last(ips,replacement = c(""),fixed = ".country")
-rm(ips_to_check1)
+"
+na_indices2 <- which(is.na(working_data$region))
+ipmissingreg <- unique(working_data$srcstr[na_indices2])
+write.csv2(ipmissingreg,'data/tempdata/ips_file.csv',row.names=F)
+rm(na_indices2,ipmissingreg)
 gc(F,F,T)
 
-ips_to_check2<-t(ips_to_check2)
-country_ips<- data.frame("srcstr"=c(ips),"region"=c(ips_to_check2))
-rm(ips_to_check2,ips)
+reticulate::py$process_ip_file('data/tempdata/ips_file.csv', 'data/tempdata/ips_with_country.csv')
+file.remove('data/tempdata/ips_file.csv')
+resolvedcountries <- data.table::fread(input='data/tempdata/ips_with_country.csv',header=T,col.names=c('srcstr', 'region'),nThread=(parallel::detectCores()-1))
+working_data <- dplyr::left_join(working_data,resolvedcountries)
+rm(resolvedcountries)
+file.remove('data/tempdata/ips_with_country.csv')
+gc(F,F,T)
+"
+resolvedcountries <- data.table::fread(input='data/tempdata/ips_with_country2.csv',header=T,col.names=c('srcstr', 'region'),nThread=(parallel::detectCores()-1))
+working_data <- dplyr::left_join(working_data,resolvedcountries)
+rm(resolvedcountries)
 gc(F,F,T)
 
-matched_index <- match(country_ips$srcstr,working_data$srcstr)
-working_data<- dplyr::left_join(working_data,country_ips)
-working_data$region <- replace(working_data$region,matched_index,country_ips$region)
-rm(matched_index,country_ips)
-gc(F,F,T)
-
-cc_countrydf <- data.table::fread(input= "data/external/GeoLite2-Country-CSV_20250103/GeoLite2-Country-Locations-en.csv",select=c(1,5,6),col.names=c("geoname_id", "cc", "region"), sep=",",quote="\"",header=T,strip.white=T,keepLeadingZeros=F,data.table=T,colClasses=c(character(7)),nThread=(parallel::detectCores() - 1))
-working_data <- dplyr::left_join(working_data,cc_countrydf)
-rm(cc_countrydf)
-gc(F,F,T)
 
 working_data <- working_data |>
-  dplyr::rename("port"="spt","protocol"="proto") |>
-  dplyr::mutate("dpt"=NULL,"src"=NULL,"dates"=NULL,"geoname_id"=NULL,"datetime"=NULL,"datetime"=datetimes,"datetimes"=NULL) |>
+  dplyr::rename("protocol"="proto") |>
   dplyr::arrange(datetime) 
 gc(F,F,T)
 
-port<-c("1433","445","3389","3306","135","53","5060","5900","123","389","5432","1434","1900","5353","11211","19","137","138","161","162","500","1900","3702","5683","20800","3283","7547","11211","7100")
-service<-c("MSSQL","SMB","RDP","MSSQL","RPC","DNS","SIP","VNC","NTP","LDAP","MSSQL","MSSQL","SSDP","mDNS","Memcached","Chargen","NetBIOS_NS","NetBIOS_DGM","SNMP","SNMP_Trap","ISAKMP","SSDP","WS_Discovery","CoAP","CompuServe","NetAssistant","TR_069","Memcached","X11")
-protocol<-c("UDP","TCP","TCP","UDP","TCP","UDP","UDP","TCP","UDP","UDP","UDP","UDP","UDP","UDP","UDP","UDP","UDP","UDP","UDP","UDP","UDP","UDP","UDP","UDP","UDP","UDP","UDP","UDP","UDP")
+working_data$ccrating <- working_data$region
+L5C<-c("United States","France","Germany","Canada","United Kingdom","Belgium","Switzerland","Netherlands","Ireland","Finland","Sweden","Norway","Denmark","Luxembourg","Puerto Rico","New Zealand","Austrailia","Iceland","Spain","Portugal")
+goodccindex <- which(working_data$ccrating %in% L5C)
+rm(L5C)
+gc(F,F,T)
 
-ddosport <- c(rep(1,length(port)))
-servdict<-data.frame(cbind(ddosport,port,service))
-rm(port,service,protocol,ddosport)
+working_data$ccrating<- replace(working_data$ccrating,goodccindex,c(rep(0,length(goodccindex))))
+working_data$ccrating<- replace(working_data$ccrating,-goodccindex,c(rep(1,length(-goodccindex))))
+rm(goodccindex)
+gc(F,F,T)
+
+
+dpt<-c("1433","445","3389","3306","135","53","5060","5900","123","389","5432","1434","1900","5353","11211","19","137","138","161","162","500","1900","3702","5683","20800","3283","7547","11211","7100","33434","1080")
+service<-c("MSSQL","SMB","RDP","MSSQL","RPC","DNS","SIP","VNC","NTP","LDAP","MSSQL","MSSQL","SSDP","mDNS","Memcached","Chargen","NetBIOS_NS","NetBIOS_DGM","SNMP","SNMP_Trap","ISAKMP","SSDP","WS_Discovery","CoAP","CompuServe","NetAssistant","TR_069","Memcached","X11","Linux_tracert","socks")
+protocol<-c("UDP","TCP","TCP","UDP","TCP","UDP","UDP","TCP","UDP","UDP","UDP","UDP","UDP","UDP","UDP","UDP","UDP","UDP","UDP","UDP","UDP","UDP","UDP","UDP","UDP","UDP","UDP","UDP","UDP","TCP","TCP")
+
+ddosport <- c(rep(1,length(dpt)))
+servdict<-data.frame(cbind(ddosport,dpt,service))
+rm(dpt,service,protocol,ddosport)
 gc(F,T,T)
 
-working_data$port <- as.character(working_data$port)
+working_data$dpt <- as.character(working_data$dpt)
 working_data <- dplyr::left_join(working_data,servdict,relationship="many-to-many")
 rm(servdict)
 gc()
+working_data$service <- C(tidyr::replace_na(working_data$service,replace="NonDDoS"))
+working_data$ddosport <- C(tidyr::replace_na(working_data$ddosport,replace="0"))
 
-working_data$service <- c(tidyr::replace_na(working_data$service,replace="NonDDoS"))
-working_data$ddosport <- c(tidyr::replace_na(working_data$ddosport,replace="0"))
-
-working_data$seconds <- C(as.character.POSIXt(working_data$datetime))
+saveRDS(working_data,"data/tempdata/working_data.RDS",compress="gzip",refhook=NULL)
+working_data$datetimes1 <- as.double.POSIXlt(working_data$datetimes)
+working_data$mu10s <- as.POSIXct(working_data$datetimes1 * 10)
+working_data$mus <- as.POSIXct(working_data$datetimes1 / 10)
 gc(F,T,T)
-
-factor(F1$IP_PS,ordered=T)
-dplyr::recode_factor(F1$IP_PS,.ordered=T,.default=)
 
 
 F1 <- working_data |>
-  dplyr::ungroup() |>
-  dplyr::mutate("V1"=NULL,"portsnum"=NULL) |>
-  dplyr::count(datetime,seconds,name="PPus",wt=NULL) 
+  dplyr::mutate("V1"=NULL) |>
+  dplyr::add_count(mus,datetimes1,datetime,protocol,service,ccrating,ddosport,name="PPmus",wt=NULL,.drop=T) 
 
-F1$PPms <- F1$PPus*10
+  F1$mus <- as.double.difftime(F1$mus)
+ F1$ms <-  F1$PPmus  *1000 / F1$mus
+ 
+F2 <- F1 |>
+  dplyr::add_count(ms,mus,service,ccrating,ddosport,name="PPms",wt=NULL,.drop=T) 
+
+
+F1$PPms <- F1$PPS*100
 exp(1)
-expect ~100k-300k 1gbps port average hardware for ddos
-expect higher pps for Dos 
 
 dplyr::consecutive_id(F1$seconds,F1$datetime)
 
