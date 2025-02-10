@@ -12,14 +12,14 @@ gc(F,F,T)
 #options("digits.secs"=0,"max.print"=1000,datatable.optimize=T)
 
 datetimes <- as.POSIXlt(raw_data$datetime, format="%d/%m/%y %M:%OS",tz="")
-datetimes <- format(datetimes,format= "%Y/%m/%d %I:%M:%OS:%Os%H",tz="UTC", usetz=F,digits=10)
+datetimes <- format(datetimes,format= "%Y/%m/%d %I:%M:%OS:%Os%H",tz="UTC", usetz=T,digits=16)
 datetimes <- as.character.POSIXt(datetimes)
 raw_data$datetimes <- datetimes
 #working_data$seconds <- C(as.character.POSIXt(working_data$datetimes))
 
 #raw_data$datetimes <- C(round.POSIXt(datetimes,units="secs"))
 #datetimes <- round.POSIXt(datetimes)
-rm(datetimes)
+#rm(datetimes)
 gc(F,T,T)
 
 "
@@ -112,9 +112,9 @@ rm(goodccindex)
 gc(F,F,T)
 
 
-dpt<-c("1433","445","3389","3306","135","53","5060","5900","123","389","5432","1434","1900","5353","11211","19","137","138","161","162","500","1900","3702","5683","20800","3283","7547","11211","7100","33434","1080")
-service<-c("MSSQL","SMB","RDP","MSSQL","RPC","DNS","SIP","VNC","NTP","LDAP","MSSQL","MSSQL","SSDP","mDNS","Memcached","Chargen","NetBIOS_NS","NetBIOS_DGM","SNMP","SNMP_Trap","ISAKMP","SSDP","WS_Discovery","CoAP","CompuServe","NetAssistant","TR_069","Memcached","X11","Linux_tracert","socks")
-protocol<-c("UDP","TCP","TCP","UDP","TCP","UDP","UDP","TCP","UDP","UDP","UDP","UDP","UDP","UDP","UDP","UDP","UDP","UDP","UDP","UDP","UDP","UDP","UDP","UDP","UDP","UDP","UDP","UDP","UDP","TCP","TCP")
+dpt<-c("1433","445","3389","3306","135","53","5060","5900","5901","5901","123","389","5432","1434","1900","5353","11211","19","137","138","161","162","500","1900","3702","5683","20800","3283","7547","11211","7100","33434","1080","6666","6667","6668","6669","22","23","4899","6675")
+service<-c("MSSQL","SMB","RDP","MSSQL","RPC","DNS","SIP","VNC","VNC","VNC","NTP","LDAP","MSSQL","MSSQL","SSDP","mDNS","Memcached","Chargen","NetBIOS_NS","NetBIOS_DGM","SNMP","SNMP_Trap","ISAKMP","SSDP","WS_Discovery","CoAP","CompuServe","NetAssistant","TR_069","Memcached","X11","Linux_tracert","socks","IRC","IRC","IRC","IRC","SSH","Telnet","RAdmin","IRC")
+protocol<-c("UDP","TCP","TCP","UDP","TCP","UDP","UDP","TCP","UDP","TCP","UDP","UDP","UDP","UDP","UDP","UDP","UDP","UDP","UDP","UDP","UDP","UDP","UDP","UDP","UDP","UDP","UDP","UDP","UDP","UDP","UDP","TCP","TCP","UDP","UDP","UDP","UDP","UDP","UDP","UDP","UDP")
 
 ddosport <- c(rep(1,length(dpt)))
 servdict<-data.frame(cbind(ddosport,dpt,service))
@@ -129,70 +129,65 @@ working_data$service <- C(tidyr::replace_na(working_data$service,replace="NonDDo
 working_data$ddosport <- C(tidyr::replace_na(working_data$ddosport,replace="0"))
 
 saveRDS(working_data,"data/tempdata/working_data.RDS",compress="gzip",refhook=NULL)
-working_data$datetimes1 <- as.double.POSIXlt(working_data$datetimes)
-working_data$mu10s <- as.POSIXct(working_data$datetimes1 * 10)
-working_data$mus <- as.POSIXct(working_data$datetimes1 / 10)
+
+
+datetimes <- as.POSIXlt(working_data$datetime, format="%d/%m/%y %M:%OS",tz="")
+datetimes <- format(datetimes,format= "%Y/%m/%d %M:%OS:%Os",tz="", usetz=T,digits=14)
+working_data$datetimes <- lubridate::fit_to_timeline(datetimes,simple=T)
+rm(datetimes)
 gc(F,T,T)
 
-
 F1 <- working_data |>
-  dplyr::mutate("V1"=NULL) |>
-  dplyr::add_count(mus,datetimes1,datetime,protocol,service,ccrating,ddosport,name="PPmus",wt=NULL,.drop=T) 
-
-  F1$mus <- as.double.difftime(F1$mus)
- F1$ms <-  F1$PPmus  *1000 / F1$mus
- 
-F2 <- F1 |>
-  dplyr::add_count(ms,mus,service,ccrating,ddosport,name="PPms",wt=NULL,.drop=T) 
-
-
-F1$PPms <- F1$PPS*100
-exp(1)
-
-dplyr::consecutive_id(F1$seconds,F1$datetime)
+  dplyr::mutate("V1"=NULL,"spt"=as.numeric(factor(spt)),"protocol"=as.numeric(factor(protocol)),"loadbalancer"=as.numeric(factor(host))) |>
+  dplyr::ungroup() |>
+  dplyr::add_count(ddosport,ccrating,service,protocol,datetimes,name="PPmus",wt=NULL,.drop=T) 
 
 F2 <- F1 |>
-  dplyr::count(,name="PPms",wt=NULL) 
+  dplyr::add_count(datetimes,long,lat,name="LongLat/ms",wt=NULL,.drop=T)
 
-F1
+rm(F1)
+gc(F,T,T)
 
-t(F1)
-ts(F1)
+F3 <- F2 |>
+  dplyr::add_count(datetimes,host,name="host/ms",wt=NULL,.drop=T)
+
+rm(F2)
+gc(F,T,T)
+
+F4 <- F3 |>
+  dplyr::add_count(datetimes,protocol,name="protocol/ms",wt=NULL,.drop=T)
+
+rm(F3)
+gc(F,T,T)
+
+F5 <- F4 |>
+  dplyr::add_count(datetimes,srcstr,name="ips/ms",wt=NULL,.drop=T)
+
+rm(F4)
+gc(F,T,T)
+
+F6 <- F5 |>
+   dplyr::mutate("PPS"=c(PPmus * 100),"long"=NULL,"lat"=NULL,"service"=NULL,"region"=NULL,"host"=NULL,"srcstr"=NULL,"spt"=NULL,"dpt"=NULL)
+
+rm(F5)
+gc(F,T,T)
+
+F6$conseqid <- dplyr::consecutive_id(F6$protocol,F6$ccrating,F6$ddosport)
+test |> dplyr::count(,wt=NULL)
+
+PPSdata <- F6$PPS
+PPSdata <- F6 |>
+  dplyr::filter(PPS < 1000)
+
+
+
+
+
+ts(F6)
 gc()
 
 
-
-F2 <- working_data |>
-  dplyr::mutate("V1"=NULL,"portsnum"=NULL) |>
-  dplyr::add_count(seconds,name="IP_PS",wt=NULL)
-gc()
-
-F3 <- working_data |>
-  dplyr::ungroup() |>
-  dplyr::mutate("V1"=NULL,"portsnum"=NULL) |>
-  dplyr::select(seconds,region,cc) |>
-  dplyr::group_by(seconds,region,cc) |>
-  dplyr::add_count(region,cc,seconds,name="RPS",wt=NULL)
-gc()
-
-F4 <- working_data |>
-  dplyr::ungroup() |>
-  dplyr::mutate("V1"=NULL,"portsnum"=NULL) |>
-  dplyr::select(seconds,host) |>
-  dplyr::group_by(seconds,host) |>
-  dplyr::add_count(host,name="DPS",wt=NULL)
-gc()
-
-F5 <- working_data |>
-  dplyr::ungroup() |>
-  dplyr::mutate("V1"=NULL,"portsnum"=NULL) |>
-  dplyr::select(seconds,protocol,port,ddosport,service) |>
-  dplyr::group_by(seconds,ddosport,port,service) |>
-  dplyr::count(seconds,ddosport,port,service,name="ProtPS",wt=NULL,.drop=T)
-
-labeled_data <- data.frame(cbind(F1$IP_PS,F2$PPS,F3$RPS,F4$DPS,F5$ProtPS, working_data$ddosport,as.numeric(factor(working_data$host)),as.numeric(factor(working_data$protocol))))
-
-log(F9$ProtPS+1)
+log(F6$+1)
 exp(F9$ProtPS+1)
 labeled_data$X1
 
@@ -202,35 +197,29 @@ levels(X1)
 unique(working_data$host)
 as.factor(working_data$host)
 unique.matrix(labeled_data,)
-as.data.frame.factor(t(labeled_data))
-transform.data.frame(labeled_data)
-format.data.frame(labeled_data, na.encode = TRUE)
-tt<-format.AsIs(t(labeled_data))
+as.data.frame.factor(F6)
+transform.data.frame(F6,)
+format.data.frame(F6, na.encode = TRUE)
+tt<-format.AsIs(t(F6))
 
-as.data.frame.raw(labeled_data,optional=T)
+as.data.frame.raw(F6,optional=T)
 as.data.frame(labeled_data,optional=T)
-as.data.frame.ts(labeled_data)
+as.data.frame.ts(F6)
 
-as.data.frame.model.matrix(labeled_data,make.names=T,optional=T)
+as.data.frame.model.matrix(F6,make.names=T,optional=T)
 test <- as.data.frame(labeled_data,fix.empty.names = TRUE)
 test <- as.matrix(labeled_data,rownames.force=T)
-t(test) %*% test
+t(F6) %*% F6
 
-rm(F1,F2,F3,F4,F5)
-gc(F,T,T)
-rm(F6,F7,F8,F9)
-gc(F,T,T)
+
 
 
 
 labeled_data <- readRDS("labled_data.RDS")
 
 ts
-(stats::
-    
-    
+
     labeled_data <- working_data1[,15:24]
-  as.fa
   labeled_data <- t(labeled_data)
   stats::
     
